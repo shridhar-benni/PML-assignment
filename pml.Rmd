@@ -1,0 +1,194 @@
+---
+title: "pml_p_g_a"
+author: "Shridhar Benni"
+date: "22/10/2020"
+output: html_document
+---
+
+## Background  
+These days there are all kinds of wearable devices like Fitbit, Apple watch, Nike watch etc. It is now possible to collcet large amount of data about physical activities.
+In this project we will get some insights from these data of the candidates by doing some analyses.
+
+## Data Sources  
+The training data for this project is available at this url:  
+[https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)  
+The test data is available at this url:  
+[https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)  
+
+## Intended Results  
+The goal of this project is to predict the manner in which the people did the exercise using all the data from these wearables. 
+
+## Reproducibility  
+We will be using soem packages, and will be setting some global variables.
+
+```{r warning=FALSE, error=FALSE}
+library(rattle)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(corrplot)
+library(randomForest)
+library(RColorBrewer)
+```  
+Finally, load the seed using following code:  
+```{r warning=FALSE, error=FALSE}
+set.seed(56879)
+```  
+
+Download the dataset to the `data` folder :
+
+```{r warning=FALSE, error=FALSE}
+trainLink <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testLink <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trainCsv <- "./data/pml-training.csv"
+testCsv  <- "./data/pml-testing.csv"
+if (!file.exists("./data")) {
+  dir.create("./data")
+}
+if (!file.exists(trainCsv)) {
+  download.file(trainLink, destfile = trainCsv, method = "curl")
+}
+if (!file.exists(testCsv)) {
+  download.file(testLink, destfile = testCsv, method = "curl")
+}
+rm(trainLink)
+rm(testLink)
+```  
+
+## Reading Data  
+Reading the two csv files into the dat frame.
+
+```{r warning=FALSE, error=FALSE}
+trainData <- read.csv(trainCsv)
+testData <- read.csv(testCsv)
+dim(trainData)
+dim(testData)
+rm(trainCsv)
+rm(testCsv)
+```  
+The training data contains `r dim(trainData)[1]` observations and `r dim(trainData)[2]` variables, while the testing data contains `r dim(testData)[1]` observations and `r dim(testData)[2]` variables.
+We have to predict `classe` variable.
+
+## Cleaning Data  
+Cleaning the data set and getting rid of the missing values.
+
+1. Clean the <b>Near Zero Variance</b> Variables from the datset.  
+```{r warning=FALSE, error=FALSE}
+val <- nearZeroVar(trainData, saveMetrics = TRUE)
+head(val, 20)
+train01 <- trainData[, !val$nzv]
+test01 <- testData[, !val$nzv]
+dim(train01)
+dim(test01)
+rm(trainData)
+rm(testData)
+rm(val)
+```  
+
+2. Removing some columns of the dataset that do not contribute to our analysis.
+```{r warning=FALSE, error=FALSE}
+reg <- grepl("^X|timestamp|user_name", names(train01))
+train <- train01[, !reg]
+test <- test01[, !reg]
+rm(reg)
+rm(train01)
+rm(test01)
+dim(train)
+dim(test)
+```  
+
+3. Removing columns that contain `NA's` values. 
+```{r warning=FALSE, error=FALSE}
+col <- (colSums(is.na(train)) == 0)
+train <- train[, col]
+test <- test[, col]
+rm(col)
+```  
+
+The cleaned training data contains `r dim(train)[1]` observations and `r dim(train)[2]` variables, while the testing data contains `r dim(test)[1]` observations and `r dim(test)[2]` variables.  
+
+Correlation Matrix of Columns in the Training Data set is. 
+```{r warning=FALSE, error=FALSE}
+corrplot(cor(train[, -length(names(train))]), method = "color", tl.cex = 0.5)
+```  
+
+## Partitioning Training Set  
+We split the cleaned training data into 2 parts with 70% as training set and 30% as validation set.
+```{r warning=FALSE, error=FALSE}
+set.seed(5679) # For reproducibile purpose
+inTrain <- createDataPartition(train$classe, p = 0.70, list = FALSE)
+valid <- train[-inTrain, ]
+train <- train[inTrain, ]
+rm(inTrain)
+```  
+The Data now consists of `r dim(train)[2]` variables with the observations divided as following:  
+1. Training Data: `r dim(train)[1]` observations.  
+2. Validation Data: `r dim(valid)[1]` observations.  
+3. Testing Data: `r dim(test)[1]` observations.  
+
+## Data Modelling  
+
+### Decision Tree  
+We use <b>Decision Tree</b> algo to create a model.
+```{r warning=FALSE, error=FALSE}
+treeModel <- rpart(classe ~ ., data = train, method = "class")
+prp(treeModel)
+```  
+
+Estimating the performance of the model on the <b>validation</b> data.
+```{r warning=FALSE, error=FALSE}
+treePredict <- predict(treeModel, valid, type = "class")
+confusionMatrix(valid$classe, treePredict)
+accuracy <- postResample(treePredict, valid$classe)
+os <- 1 - as.numeric(confusionMatrix(valid$classe, treePredict)$overall[1])
+rm(treePredict)
+rm(treeModel)
+```  
+
+The Estimated Accuracy of the Random Forest Model is `r accuracy[1]*100`% and the Estimated Out-of-Sample Error is `r os*100`%.  
+
+### Random Forest
+We use a <b>Random Forest</b> predictive model  for activity recognition.
+```{r warning=FALSE, error=FALSE}
+rfModel <- train(classe ~ ., data = train, method = "rf", trControl = trainControl(method = "cv", 5), ntree = 250)
+rfModel
+```  
+
+Now, we estimate the performance of the model on the <b>validation</b> data set.  
+```{r warning=FALSE, error=FALSE}
+rfPredict <- predict(rfModel, valid)
+confusionMatrix(valid$classe, rfPredict)
+accuracy <- postResample(rfPredict, valid$classe)
+os <- 1 - as.numeric(confusionMatrix(valid$classe, rfPredict)$overall[1])
+rm(rfPredict)
+```  
+
+The Estimated Accuracy of the Random Forest Model is `r accuracy[1]*100`% and the Estimated Out-of-Sample Error is `r os*100`%.  
+Random Forests yielded better Results, as expected!  
+
+## Predicting The Manner of Exercise for Test Data Set  
+```{r warning=FALSE, error=FALSE}
+rm(accuracy)
+rm(os)
+predict(rfModel, test[, -length(names(test))])
+```  
+
+## Generating Files 
+```{r warning=FALSE, error=FALSE}
+write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("./problem_id_",i,".txt")
+    write.table(x[i], file = filename, quote = FALSE, row.names = FALSE, col.names = FALSE)
+  }
+}
+```  
+
+```{r warning=FALSE, error=FALSE}
+write_files(predict(rfModel, test[, -length(names(test))]))
+rm(rfModel)
+rm(train)
+rm(test)
+rm(valid)
+rm(write_files)
+```  
